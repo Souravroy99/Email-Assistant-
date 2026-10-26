@@ -3,16 +3,26 @@ package com.email.email_writer.service;
 import com.email.email_writer.model.EmailRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
 @Service
 public class EmailGeneratorService {
+
+    private final WebClient webClient ;
+
     @Value("${gemini.api.url}")
     private String geminiApiUrl;
 
     @Value("${gemini.api.key}")
     private String geminiApiKey;
+
+    public EmailGeneratorService(WebClient.Builder webClientBuilder) {
+        this.webClient = webClientBuilder.build() ;
+    }
 
     public String generateEmailReply(EmailRequest emailRequest) {
         String prompt = buildPrompt(emailRequest) ;
@@ -25,7 +35,35 @@ public class EmailGeneratorService {
                 }
         );
 
-        return null;
+        String response = webClient.post()
+                .uri(geminiApiUrl)
+                .header("x-goog-api-key", geminiApiKey)
+                .header("Content-Type", "application/json")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+
+        return extractResponseContent(response);
+    }
+
+    private String extractResponseContent(String response) {
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response);
+
+            return rootNode.path("candidates")
+                    .get(0)
+                    .path("content")
+                    .path("parts")
+                    .get(0)
+                    .path("text")
+                    .asText();
+
+        } catch(Exception e) {
+            return "Error processing request: " + e.getMessage();
+        }
     }
 
     private String buildPrompt(EmailRequest emailRequest) {
